@@ -6,7 +6,6 @@ module RES{
     export class TilesAnalyzer extends BinAnalyzer{
 
         private _jsonData:any = {};
-        private _texture:any = {};
 
         public constructor(){
             super();
@@ -20,54 +19,62 @@ module RES{
 
         private getJsonLoadCallback(compFunc, context){
             return (resItem:ResourceItem)=>{
+                const groupName:string = resItem.name + "_group";
+                if(RES.hasRes(groupName)){
+                    compFunc.call(context, resItem)
+                } else {
+                    const baseUrl:string = resItem.url.split(".")[0];
+                    const jsonData = this._jsonData[resItem.name];
 
-                const baseUrl:string = resItem.url.split(".")[0];
-                const jsonData = this._jsonData[resItem.name];
+                    const column:number = this.getColumnNum(jsonData);        //列数
+                    const row:number = this.getRowNum(jsonData);        //行数
 
-                const column:number = this.getColumnNum(jsonData);		//列数
-                const row:number = this.getRowNum(jsonData);		//行数
-
-                var res = [];
-                for(var i = 0; i<row; ++i){
-                    for(var j = 0; j < column; ++j){
-                        var name = i + "_" + j;
-                        res.push({
-                            id: name, url: baseUrl + "/" + name + "." + jsonData.extension
-                        });
+                    const res = [];
+                    //创建组
+                    for(var i = 0; i<row; ++i){
+                        for(var j = 0; j < column; ++j){
+                            let name:string = resItem.name + "_" + i + "_" + j;
+                            let url:string = baseUrl + "/" + i + "_" + j + "." + jsonData.extension;
+                            res.push(name);
+                            RES.$addResourceData({name: name, type: "image", url: url});
+                        }
                     }
+
+                    RES.createGroup(groupName, res, true);
+                    this.loadGroup(groupName, ()=>compFunc.call(context, resItem), null);
                 }
-                var loadingNum = column * row;
-
-                var resLoaded = (data, item)=>{
-                    this._texture[resItem.name][item.id] = data;
-                    loadingNum --;
-                    if(loadingNum <= 0){
-                        compFunc.call(context, resItem);
-                    }
-                };
-                res.forEach((item)=>this.loadRes(item, resLoaded, this));
             };
         }
 
-        //加载单张小图
-        private loadRes(item, compFunc, context){
-            var loader = new egret.ImageLoader();
-            loader.addEventListener(egret.Event.COMPLETE, ()=>{
-                var texture = new egret.Texture();
-                texture._setBitmapData(loader.data);
-                compFunc.call(context, texture, item);
-            }, this);
-            loader.addEventListener(egret.IOErrorEvent.IO_ERROR, (event:egret.IOErrorEvent)=>{
-                egret.warn(event.toString());
-            }, this);
-            //api兼容
-            var virtualUrl = RES["getVirtualUrl"]
-                ? RES["getVirtualUrl"](item.url)
-                : RES["getVersionController"]()["getVirtualUrl"](item.url);
-            loader.load(virtualUrl);
+        //加载资源组
+        private loadGroup(groupName, compFunc, context){
+            var onComplete = (event:ResourceEvent)=>{
+                if(event.groupName == groupName){
+                    removeEventListener();
+                    compFunc.call(context);
+                }
+            };
+            //var onProgress = (event:ResourceEvent)=>{
+            //    if(event.groupName == groupName)
+            //        console.log(event.itemsLoaded + " / " + event.itemsTotal);
+            //};
+            var onError = (event:ResourceEvent)=>{
+                if(event.groupName == groupName){
+                    removeEventListener();
+                    egret.error("资源组加载失败！", groupName);
+                }
+            };
+            var removeEventListener = ()=>{
+                RES.addEventListener(ResourceEvent.GROUP_COMPLETE, onComplete, null);
+                RES.addEventListener(ResourceEvent.GROUP_LOAD_ERROR, onError, null);
+                //RES.addEventListener(ResourceEvent.GROUP_PROGRESS, onProgress, null);
+            };
+            RES.addEventListener(ResourceEvent.GROUP_COMPLETE, onComplete, null);
+            RES.addEventListener(ResourceEvent.GROUP_LOAD_ERROR, onError, null);
+            //RES.addEventListener(ResourceEvent.GROUP_PROGRESS, onProgress, null);
+            //最高优先集
+            RES.loadGroup(groupName, Number.MAX_VALUE);
         }
-
-
 
         /**
          * 解析并缓存加载成功的数据
@@ -82,7 +89,6 @@ module RES{
             } catch (e) {
                 egret.$warn(1017, resItem.url, data);
             }
-            this._texture[name] = {};
         }
 
         /**
@@ -90,16 +96,13 @@ module RES{
          */
         public getRes(name:string): any{
             const jsonData:any = this._jsonData[name];
-            const textures:any = this._texture[name];
-
-            const column:number = this.getColumnNum(jsonData);		//列数
-            const row:number = this.getRowNum(jsonData);		//行数
+            const column:number = this.getColumnNum(jsonData);        //列数
+            const row:number = this.getRowNum(jsonData);        //行数
 
             const container:egret.DisplayObjectContainer = new egret.DisplayObjectContainer();
             for(var i = 0; i < row; ++i){
                 for(var j = 0; j < column; ++j) {
-                    let name:string = i + "_" + j;
-                    let bitmap:egret.Bitmap = new egret.Bitmap(textures[name]);
+                    var bitmap:egret.Bitmap = new egret.Bitmap(RES.getRes(name + "_" + i + "_" + j));
                     bitmap.x = j * jsonData.itemWidth;
                     bitmap.y = i * jsonData.itemHeight;
                     container.addChild(bitmap);
@@ -120,7 +123,7 @@ module RES{
          * @inheritDoc
          */
         public hasRes(name:string): boolean{
-            return this._jsonData[name] && this._texture[name] && Object.keys(this._texture[name]).length > 0;
+            return RES.hasRes(name + "_group");
         }
         /**
          * @inheritDoc
@@ -128,14 +131,7 @@ module RES{
         public destroyRes(name:string): boolean{
             if(this._jsonData[name])
                 delete this._jsonData[name];
-            if(this._texture[name]){
-                for(var key in this._texture[name]){
-                    var texture:egret.Texture = this._texture[name][key];
-                    texture.dispose();
-                }
-                delete this._texture[name];
-            }
-            return true;
+            return RES.destroyRes(name + "_group");
         }
     }
 
