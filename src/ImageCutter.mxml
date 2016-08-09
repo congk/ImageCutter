@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" addedToStage="windowedapplication1_addedToStageHandler(event)"
+					   xmlns:s="library://ns.adobe.com/flex/spark" opaqueBackground="0xeeffee" currentState="ready"
+					   xmlns:mx="library://ns.adobe.com/flex/mx" width="800" minHeight="600">
+	<s:states>
+		<s:State id="ready" name="ready"/>
+		<s:State id="cutting" name="cutting"/>
+	</s:states>
+	
+	<fx:Script>
+		<![CDATA[
+			import mx.graphics.codec.JPEGEncoder;
+			import mx.graphics.codec.PNGEncoder;
+			
+			import org.apache.flex.collections.VectorCollection;
+			
+			[Bindable]	private var _itemWidth:String = "256";
+			[Bindable]	private var _itemHeight:String = "256";
+			
+			private const datas:VectorCollection = new VectorCollection();
+			private var _index:uint = 1;
+			
+			protected function windowedapplication1_addedToStageHandler(event:Event):void
+			{
+				this.addEventListener("delete", this.deleteItem);
+			}
+			
+			//删除单个选项
+			private function deleteItem(event:DataEvent):void
+			{
+				const path:String = event.data;
+				for(var i:int = this.datas.length - 1; i>=0; i--){
+					if(this.datas.getItemAt(i).nativePath == path){
+						this.datas.removeItemAt(i);
+						break;
+					}
+				}
+			}
+			
+			//选择多个图片
+			protected function selectedFiles(event:MouseEvent):void
+			{
+				var file:File = new File();
+				file.addEventListener(FileListEvent.SELECT_MULTIPLE, this.onSelectMultiple);
+				file.browseForOpenMultiple("请选择图片文件", [new FileFilter("Images", "*.jpg;*.png")]);
+			}
+			
+			//选择文件夹
+			protected function selectedDirectory(event:MouseEvent):void
+			{
+				var file:File = new File();
+				file.addEventListener(Event.SELECT, this.onSelectedDirectory);
+				file.browseForDirectory("请选择文件夹");
+			}
+			
+			private function onSelectMultiple(event:FileListEvent):void{
+				this.datas.removeAll();
+				event.files.forEach(function(item:Object, index:int, arr:Array):void{
+					this.datas.addItem(item);
+				}, this);
+			}
+			
+			private function onSelectedDirectory(event:Event):void{
+				//递归查找文件夹内的所有图片文件
+				this.datas.removeAll();
+				(function tempFunc(files:Array):void{
+					files.forEach(function(item:Object, index:Number, arr:Array):void{
+						if(item.isDirectory){
+							tempFunc.call(this, item.getDirectoryListing());
+						} else if(item.extension == "png" || item.extension == "jpg"){
+							this.datas.addItem(item);
+						}
+					}, this);
+				}).call(this, event.target.getDirectoryListing());
+			}
+			
+			//点击处理按钮
+			protected function startButtonClicked(event:MouseEvent):void
+			{
+				this.currentState = this.cutting.name;
+				this.handleFiles();
+				this._index = 1;
+			}
+			
+			private function handleFiles():void{
+				this.progressBar.setProgress(this._index, this.datas.length);
+				
+				if(this._index > this.datas.length){
+					this.currentState = this.ready.name;
+					this.progressBar.label = "处理完毕";
+					this.datas.removeAll();
+				} else {
+					this.progressBar.label = '正在处理...' + this._index + ' / ' + this.datas.length;
+					var file:File = this.datas.getItemAt(this._index - 1) as File;
+					this.loadFileToBitmapData(file, function(bitmapData:BitmapData):void{
+						//处理bitmapData
+						this.handleBitmapData(bitmapData, file);
+					}, this);
+				}
+			}
+			
+			//加载File所引用的资源并转化为可用的BitmapData对象
+			private function loadFileToBitmapData(file:File, onComplete:Function, context:Object):void{
+				file.addEventListener(Event.COMPLETE, function(event:Event):void{	
+					file.removeEventListener(Event.COMPLETE, arguments.callee);
+					var byteArray:ByteArray = event.target.data;
+					var loader:Loader = new Loader();
+					loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(event:Event):void{
+						var bitmapData:BitmapData = event.target.content.bitmapData;
+						onComplete.call(context, bitmapData);
+					});
+					loader.loadBytes(byteArray);
+				});
+				file.load();
+			}
+			
+			//将整张图片切割为多张小图，并最终保存配置
+			private function handleBitmapData(bitmapData:BitmapData, file:File):void{
+				
+				const itemW:uint = parseInt(this._itemWidth);
+				const itemH:uint = parseInt(this._itemHeight);
+				
+				const name:String = file.name.split(".")[0];
+				const extension:String = file.extension.toLowerCase();
+				const key:String = file.name.replace(".", "_");
+				
+				const column:uint = Math.ceil(bitmapData.width / itemW);		//列数
+				const row:uint = Math.ceil(bitmapData.height / itemH);		//行数
+				
+				const encoder:Object = extension == "png" ? new PNGEncoder() : new JPEGEncoder();
+			
+				const json:Object = {
+					extension: extension,
+					width: bitmapData.width,
+					height: bitmapData.height,
+					itemWidth: itemW,
+					itemHeight: itemH
+				};
+				
+				const tempDir:File = file.parent.resolvePath(name);			//同名文件夹
+				tempDir.exists && tempDir.deleteDirectory(true);			//清除此前残留文件
+				
+				for(var i:int = 0; i<row; ++i){
+					for(var j:int = 0; j<column; ++j){
+						//单张宽高
+						const width:uint = j == column - 1 && bitmapData.width % itemW != 0
+							? bitmapData.width % itemW : itemW;
+						const height:uint = i == row - 1 && bitmapData.height % itemH != 0
+							? bitmapData.height % itemH : itemH;
+						//写入ByteArray
+						const bmpd:BitmapData = new BitmapData(width, height, extension == "png");
+						bmpd.copyPixels(bitmapData, new Rectangle(j * itemW, i * itemH, width, height), new Point());
+						const byteArray:ByteArray = encoder.encode(bmpd);
+						//单张图片名称
+						const filename:String = i + "_" + j;
+						//存储图片
+						const stream:FileStream = new FileStream();
+						try{
+							stream.open(tempDir.resolvePath(filename + "." + extension), FileMode.WRITE);
+							stream.writeBytes(byteArray);
+							stream.close();
+						} catch(e:Error){
+							trace(e.message);
+						}
+					}
+				}
+				
+				//存储json文件
+				const jsonStream:FileStream = new FileStream();
+				try{
+					jsonStream.open(file.parent.resolvePath(name + ".tiles"), FileMode.WRITE);
+					jsonStream.writeUTFBytes(JSON.stringify(json));
+					jsonStream.close();
+				} catch (e:Error) {
+					trace(e.message);
+				}
+				
+				this._index ++;
+				callLater(this.handleFiles);
+			}
+		]]>
+	</fx:Script>
+	<s:VGroup width="100%" height="100%" gap="0">
+		<!-- 目标路径区域 -->		
+		<s:Group width="100%" height="100%" enabled.cutting="false">
+			<s:List id="list" width="80%" height="100%" useVirtualLayout="true" dataProvider="{datas}" enabled.cutting="false">
+				<s:layout>
+					<s:VerticalLayout padding="5" gap="2" horizontalAlign="center"/>
+				</s:layout>
+				<s:itemRenderer>
+					<fx:Component>
+						<s:ItemRenderer width="100%" height="22" autoDrawBackground="false" opaqueBackground="0xffffff">
+							<fx:Script>
+								<![CDATA[
+									protected function button1_clickHandler(event:MouseEvent):void
+									{
+										event.stopImmediatePropagation();
+										this.dispatchEvent(new DataEvent("delete", true, true, this.data.nativePath));
+									}
+								]]>
+							</fx:Script>
+							<s:Group width="100%" height="100%">
+								<s:Line width="90%" bottom="0" height="1" left="5">
+									<s:stroke>
+										<s:SolidColorStroke color="0x9e9e9e" weight="1" alpha=".5"/>
+									</s:stroke>
+								</s:Line>
+								<s:Label text="{data.nativePath}" left="5" width="600" height="100%" verticalAlign="middle"/>
+								<s:Label text="x" color="0xff0000" click="button1_clickHandler(event)" width="20" textAlign="center" height="100%"
+										 right="5" verticalAlign="middle" useHandCursor="true"/>
+							</s:Group>
+						</s:ItemRenderer>
+					</fx:Component>
+				</s:itemRenderer>
+			</s:List>
+			
+			<s:Group width="20%" height="100%" right="0" enabled.cutting="false">
+				<s:VGroup width="90%" height="100%" horizontalAlign="center" gap="10" paddingTop="20">
+					<s:HGroup verticalAlign="middle" width="100%" horizontalAlign="center" gap="10">
+						<s:Label text="单张宽度"/>
+						<s:TextInput width="100%" height="22" text="@{_itemWidth}" restrict="0-9" maxChars="3"/>
+					</s:HGroup>
+					<s:HGroup verticalAlign="middle" width="100%" horizontalAlign="center" gap="10">
+						<s:Label text="单张高度"/>
+						<s:TextInput width="100%" height="22" text="@{_itemHeight}" restrict="0-9" maxChars="3"/>
+					</s:HGroup>
+					<s:Button label="选择文件" width="100" click="selectedFiles(event)"/>
+					<s:Button label="选择文件夹" width="100" click="selectedDirectory(event)"/>
+					<s:Button label="开始处理" width="100" click="startButtonClicked(event)"
+							  enabled.ready="{!(!this.datas.length||!this._itemWidth||!this._itemHeight)}"
+							  enabled.cutting="false"/>
+				</s:VGroup>
+			</s:Group>
+		</s:Group>
+		
+		<mx:ProgressBar width="100%" id="progressBar" height="20" labelPlacement="center" alpha.ready=".5"
+						label="等待处理"/>
+	</s:VGroup>
+</s:WindowedApplication>
