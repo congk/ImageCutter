@@ -15,6 +15,12 @@
 
 # 使用
 在入口Main.ts文件中对RES注入 .tiles 文件类型的解析器，解析器在other目录下可找到：
+
+注入方法：
 ```typescript
-RES.registerAnalyzer("tiles", RES.TilesAnalyzer);
+//同步方式，当加载.tiles文件时，会自动将所有的碎片文件同时加载
+RES.registerAnalyzer("tiles", ext.TilesAnalyzer.SyncInstance);
+
+//异步方式，只加载.tiles文件，所有的碎片纹理按需自行加载
+RES.registerAnalyzer("tiles", ext.TilesAnalyzer.ASyncInstance);
 ```
