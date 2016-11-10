@@ -21,6 +21,6 @@
 //同步方式，当加载.tiles文件时，会自动将所有的碎片文件同时加载
 RES.registerAnalyzer("tiles", ext.TilesAnalyzer.SyncInstance);
 
-//异步方式，只加载.tiles文件，所有的碎片纹理按需自行加载
+//异步方式，只加载.tiles文件，所有的碎片纹理按需手动加载
 RES.registerAnalyzer("tiles", ext.TilesAnalyzer.ASyncInstance);
 ```
